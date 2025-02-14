@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Voice Chatbot</title>
+
+  <!-- Bootstrap CSS -->
+  <link
+    rel="stylesheet"
+    href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+    integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO"
+    crossorigin="anonymous"
+  />
+
+  <!-- Font Awesome for Microphone Icon -->
+  <link
+    rel="stylesheet"
+    href="https://use.fontawesome.com/releases/v5.5.0/css/all.css"
+    integrity="sha384-B4dIYHKNBt8Bc12p+WXckhzcICo0wtJAoU8YZTY5qE0Id1GSseTk6S+L3BlXeVIU"
+    crossorigin="anonymous"
+  />
+
+  <!-- jQuery & Bootstrap JS -->
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script
+    src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/js/bootstrap.min.js"
+    integrity="sha384-smHYKdTr4X8dM3c7fYILiyb8wZ8WAIv2aNt9Uq1JG7tM1Y3SV3QUFoDbZUhG6K6"
+    crossorigin="anonymous"
+  ></script>
+
+  <!-- Custom CSS (Your gradient, mic animations, etc.) -->
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="text-center">Voice Chatbot</h1>
+
+    <!-- Chat Box with Mic Icon & Status Text -->
+    <div class="chat-box">
+      <div id="micIcon" class="mic-icon">
+        <i class="fas fa-microphone"></i>
+      </div>
+      <p id="responseText" class="response-text">Press "Start" to begin.</p>
+    </div>
+
+    <!-- Hidden Audio Element for Playback -->
+    <audio id="audioPlayer" hidden></audio>
+
+    <!-- Button Container (Start/Stop) -->
+    <div class="button-container">
+      <button id="startBtn" class="btn btn-primary">
+        <i class="fas fa-play"></i> Start
+      </button>
+      <button id="stopBtn" class="btn btn-danger" disabled>
+        <i class="fas fa-stop"></i> Stop
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let isConversationActive = false;
+    const responseText = document.getElementById('responseText');
+    const micIcon = document.getElementById('micIcon');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    // Start Button Click
+    startBtn.addEventListener('click', async () => {
+      if (isConversationActive) return;
+      
+      responseText.textContent = "Listening... Speak now!";
+      micIcon.classList.add("listening");
+      isConversationActive = true;
+      await startConversation();
+    });
+
+    // Main Conversation Flow
+    async function startConversation() {
+      if (!isConversationActive) return;
+
+      try {
+        // Send POST to /start to record audio, transcribe, and get AI speech
+        const response = await fetch('/start', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error("Failed to start conversation.");
+        }
+
+        // Read streamed audio data from /start
+        const reader = response.body.getReader();
+        const audioChunks = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          audioChunks.push(value);
+        }
+
+        // Convert audio chunks to a playable Blob
+        const audioBlob = new Blob(audioChunks, { type: "audio/mpeg" });
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        // Play AI-generated speech
+        audioPlayer.src = audioUrl;
+        audioPlayer.hidden = false;
+        audioPlayer.play();
+
+        // Switch mic from listening to speaking
+        micIcon.classList.remove("listening");
+        micIcon.classList.add("speaking");
+        responseText.textContent = "AI is responding...";
+
+        // Once speech finishes, listen again if still active
+        audioPlayer.onended = () => {
+          if (isConversationActive) {
+            responseText.textContent = "Listening again... Speak now!";
+            micIcon.classList.remove("speaking");
+            micIcon.classList.add("listening");
+            startConversation();
+          }
+        };
+
+        stopBtn.disabled = false;
+      } catch (error) {
+        console.error("Error:", error);
+        responseText.textContent = "Error occurred.";
+        isConversationActive = false;
+      }
+    }
+
+    // Stop Button Click
+    stopBtn.addEventListener('click', async () => {
+      isConversationActive = false;
+      responseText.textContent = "Conversation stopped.";
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      micIcon.classList.remove("listening", "speaking");
+
+      // Notify server to stop
+      try {
+        await fetch('/stop', { method: 'POST' });
+      } catch (error) {
+        console.error("Error stopping conversation:", error);
+      }
+    });
+  </script>
+</body>
+</html>
